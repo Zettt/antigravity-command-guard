@@ -170,4 +170,19 @@ describe("writeAuditLog", () => {
       "cmd-3",
     );
   });
+
+  it("propagates filesystem errors if destination path is an invalid target", async () => {
+    // Attempting to write into an existing regular file as a parent directory fails
+    const blockerFile = join(testDir, "blocker.txt");
+    await Bun.write(blockerFile, "content");
+    const invalidLogPath = join(blockerFile, "audit.jsonl");
+
+    const entry: AuditLogEntry = {
+      timestamp: "2026-10-03T12:00:00.000Z",
+      command: "test",
+      decision: "allow",
+    };
+
+    expect(writeAuditLog(entry, { logPath: invalidLogPath })).rejects.toThrow();
+  });
 });

@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-10-04T15:21:15.000Z",
+  "story": "bob-harness-baseline-hardening",
+  "repository": "antigravity-command-guard",
+  "version": "0.2.0",
+  "stages": {
+    "specifier": {
+      "status": "PASS",
+      "testSuites": 11,
+      "totalTests": 107,
+      "passingTests": 107,
+      "failingTests": 0,
+      "testsAdded": 7
+    },
+    "coder": {
+      "status": "PASS",
+      "dependencies": 0,
+      "bundleTarget": "bun",
+      "bundleSizeKb": 32.1
+    },
+    "cleaner": {
+      "status": "PASS",
+      "architecture": "Clean Architecture",
+      "inwardDependencies": true,
+      "ioDecoupled": true
+    },
+    "hardener": {
+      "status": "PASS",
+      "crapThreshold": 8.0,
+      "maxCyclomaticComplexity": 7,
+      "functionsAudited": [
+        { "name": "handlePreToolUse", "complexity": 7, "crap": 7.0 },
+        { "name": "handleSettingsEvaluation", "complexity": 3, "crap": 3.0 },
+        { "name": "handleJevEvaluation", "complexity": 4, "crap": 4.0 },
+        { "name": "handleFileMutation", "complexity": 3, "crap": 3.0 },
+        { "name": "createResponder", "complexity": 4, "crap": 4.0 },
+        { "name": "detectSeparatorLength", "complexity": 5, "crap": 5.0 },
+        { "name": "splitCommandChain", "complexity": 7, "crap": 7.0 },
+        { "name": "checkCatastrophicCommands", "complexity": 6, "crap": 6.0 },
+        { "name": "checkChmodAndDd", "complexity": 5, "crap": 5.0 },
+        { "name": "checkExploits", "complexity": 3, "crap": 3.0 },
+        { "name": "findBlockedToken", "complexity": 6, "crap": 6.0 },
+        { "name": "findPrefixRuleMatch", "complexity": 5, "crap": 5.0 },
+        { "name": "findAllowChainMatch", "complexity": 5, "crap": 5.0 },
+        { "name": "evaluateSettingsPermission", "complexity": 6, "crap": 6.0 },
+        { "name": "collectRedReasons", "complexity": 4, "crap": 4.0 },
+        { "name": "collectYellowReasons", "complexity": 5, "crap": 5.0 },
+        { "name": "evaluateRiskTier", "complexity": 3, "crap": 3.0 }
+      ]
+    },
+    "qa": {
+      "status": "PASS",
+      "regressions": 0,
+      "signOff": true
+    }
+  }
+}

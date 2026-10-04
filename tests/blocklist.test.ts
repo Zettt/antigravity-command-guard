@@ -66,4 +66,43 @@ describe("findBlockedToken", () => {
     expect(findBlockedToken("rm file.txt")).toBeNull();
     expect(findBlockedToken("rm -f file.txt")).toBeNull();
   });
+
+  it("detects blocked commands embedded within command substitutions", () => {
+    expect(findBlockedToken("echo $(rm -rf /)")).toBe("rm -rf");
+    expect(findBlockedToken("eval $(echo dangerous)")).toBe("eval dynamic execution");
+    expect(findBlockedToken("var=`rm -rf /`")).toBe("rm -rf");
+  });
+});
+
+describe("splitCommandChain", () => {
+  it("preserves separators within single and double quotes", async () => {
+    const { splitCommandChain } = await import("../src/blocklist.ts");
+    expect(splitCommandChain('echo "foo; bar" && ls')).toEqual([
+      'echo "foo; bar"',
+      "ls",
+    ]);
+    expect(splitCommandChain("echo 'a && b' || ls")).toEqual([
+      "echo 'a && b'",
+      "ls",
+    ]);
+  });
+
+  it("splits multiline strings, pipes, and sequence operators", async () => {
+    const { splitCommandChain } = await import("../src/blocklist.ts");
+    expect(splitCommandChain("git status\nls -la")).toEqual([
+      "git status",
+      "ls -la",
+    ]);
+    expect(splitCommandChain("cmd1 | cmd2 ; cmd3")).toEqual([
+      "cmd1",
+      "cmd2",
+      "cmd3",
+    ]);
+  });
+
+  it("returns empty array for empty or whitespace-only input", async () => {
+    const { splitCommandChain } = await import("../src/blocklist.ts");
+    expect(splitCommandChain("")).toEqual([]);
+    expect(splitCommandChain("   \t\n  ")).toEqual([]);
+  });
 });

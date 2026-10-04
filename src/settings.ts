@@ -60,6 +60,47 @@ function matchesPrefix(command: string, prefix: string): boolean {
   return command.startsWith(`${prefix} `);
 }
 
+function findPrefixRuleMatch(
+  segments: string[],
+  trimmed: string,
+  prefixes: string[],
+): string | null {
+  for (const seg of segments) {
+    for (const prefix of prefixes) {
+      if (matchesPrefix(seg, prefix)) {
+        return `command(${prefix})`;
+      }
+    }
+  }
+  for (const prefix of prefixes) {
+    if (matchesPrefix(trimmed, prefix)) {
+      return `command(${prefix})`;
+    }
+  }
+  return null;
+}
+
+function findAllowChainMatch(
+  segments: string[],
+  allowPrefixes: string[],
+): string | null {
+  const matchedRules: string[] = [];
+  for (const seg of segments) {
+    let segmentAllowed = false;
+    for (const prefix of allowPrefixes) {
+      if (matchesPrefix(seg, prefix)) {
+        matchedRules.push(`command(${prefix})`);
+        segmentAllowed = true;
+        break;
+      }
+    }
+    if (!segmentAllowed) {
+      return null;
+    }
+  }
+  return matchedRules.length > 0 ? matchedRules.join(" && ") : null;
+}
+
 export function evaluateSettingsPermission(
   command: string,
   permissions: ParsedPermissions,
@@ -74,51 +115,19 @@ export function evaluateSettingsPermission(
     return null;
   }
 
-  for (const seg of segments) {
-    for (const prefix of permissions.deny) {
-      if (matchesPrefix(seg, prefix)) {
-        return { decision: "deny", rule: `command(${prefix})` };
-      }
-    }
+  const denyRule = findPrefixRuleMatch(segments, trimmed, permissions.deny);
+  if (denyRule) {
+    return { decision: "deny", rule: denyRule };
   }
 
-  for (const prefix of permissions.deny) {
-    if (matchesPrefix(trimmed, prefix)) {
-      return { decision: "deny", rule: `command(${prefix})` };
-    }
+  const askRule = findPrefixRuleMatch(segments, trimmed, permissions.ask);
+  if (askRule) {
+    return { decision: "ask", rule: askRule };
   }
 
-  for (const seg of segments) {
-    for (const prefix of permissions.ask) {
-      if (matchesPrefix(seg, prefix)) {
-        return { decision: "ask", rule: `command(${prefix})` };
-      }
-    }
-  }
-
-  for (const prefix of permissions.ask) {
-    if (matchesPrefix(trimmed, prefix)) {
-      return { decision: "ask", rule: `command(${prefix})` };
-    }
-  }
-
-  const matchedAllowRules: string[] = [];
-  for (const seg of segments) {
-    let segmentAllowed = false;
-    for (const prefix of permissions.allow) {
-      if (matchesPrefix(seg, prefix)) {
-        matchedAllowRules.push(`command(${prefix})`);
-        segmentAllowed = true;
-        break;
-      }
-    }
-    if (!segmentAllowed) {
-      return null;
-    }
-  }
-
-  if (matchedAllowRules.length > 0) {
-    return { decision: "allow", rule: matchedAllowRules.join(" && ") };
+  const allowRule = findAllowChainMatch(segments, permissions.allow);
+  if (allowRule) {
+    return { decision: "allow", rule: allowRule };
   }
 
   return null;

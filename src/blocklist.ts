@@ -53,6 +53,19 @@ export const EXPLOIT_PATTERNS: Array<{ pattern: RegExp; token: string }> = [
   },
 ];
 
+function detectSeparatorLength(char: string, nextChar: string | undefined): number {
+  if (char === "\n" || char === "\r" || char === ";") {
+    return 1;
+  }
+  if ((char === "&" && nextChar === "&") || (char === "|" && nextChar === "|")) {
+    return 2;
+  }
+  if (char === "|") {
+    return 1;
+  }
+  return 0;
+}
+
 export function splitCommandChain(command: string): string[] {
   const trimmed = command.trim();
   if (trimmed.length === 0) {
@@ -93,37 +106,13 @@ export function splitCommandChain(command: string): string[] {
     }
 
     if (!inSingleQuote && !inDoubleQuote) {
-      if (char === "\n" || char === "\r" || char === ";") {
+      const sepLen = detectSeparatorLength(char, trimmed[i + 1]);
+      if (sepLen > 0) {
         if (current.trim().length > 0) {
           segments.push(current.trim());
         }
         current = "";
-        continue;
-      }
-
-      if (char === "&" && trimmed[i + 1] === "&") {
-        if (current.trim().length > 0) {
-          segments.push(current.trim());
-        }
-        current = "";
-        i++;
-        continue;
-      }
-
-      if (char === "|" && trimmed[i + 1] === "|") {
-        if (current.trim().length > 0) {
-          segments.push(current.trim());
-        }
-        current = "";
-        i++;
-        continue;
-      }
-
-      if (char === "|") {
-        if (current.trim().length > 0) {
-          segments.push(current.trim());
-        }
-        current = "";
+        i += sepLen - 1;
         continue;
       }
     }
@@ -138,6 +127,68 @@ export function splitCommandChain(command: string): string[] {
   return segments;
 }
 
+function checkCatastrophicCommands(cmd: string): string | null {
+  if (/\bgit\s+reset\s+--hard\b/.test(cmd)) {
+    return "git reset --hard";
+  }
+
+  const mkfsMatch = cmd.match(/\b(mkfs(?:\.[a-zA-Z0-9_-]+)?)\b/);
+  if (mkfsMatch?.[1]) {
+    return mkfsMatch[1];
+  }
+
+  const rmMatch = cmd.match(RM_RECURSIVE_PATTERN);
+  if (rmMatch) {
+    const flagPart = rmMatch[1]?.trim() ?? "-rf";
+    const targetArgs = rmMatch[2]?.trim() ?? "";
+    if (CATASTROPHIC_TARGET_PATTERN.test(targetArgs)) {
+      return `rm ${flagPart}`;
+    }
+  }
+
+  return null;
+}
+
+function checkChmodAndDd(cmd: string): string | null {
+  const chmodMatch = cmd.match(
+    /\bchmod\s+(?:(-R\s+0?777)|(0?777\s+-R)|(-R\s+a\+rwx)|(a\+rwx\s+-R)|(0?777)|(a\+rwx))\b/,
+  );
+  if (chmodMatch) {
+    const matchedFlags =
+      chmodMatch[1] ??
+      chmodMatch[2] ??
+      chmodMatch[3] ??
+      chmodMatch[4] ??
+      chmodMatch[5] ??
+      chmodMatch[6];
+    return `chmod ${matchedFlags}`;
+  }
+
+  const tokens = cmd.split(/\s+/);
+  let commandIndex = 0;
+  while (
+    commandIndex < tokens.length &&
+    WRAPPER_PREFIXES.has(tokens[commandIndex])
+  ) {
+    commandIndex += 1;
+  }
+
+  if (tokens[commandIndex] === "dd") {
+    return "dd";
+  }
+
+  return null;
+}
+
+function checkExploits(cmd: string): string | null {
+  for (const exploit of EXPLOIT_PATTERNS) {
+    if (exploit.pattern.test(cmd)) {
+      return exploit.token;
+    }
+  }
+  return null;
+}
+
 export function findBlockedToken(rawCommand: string): string | null {
   const trimmed = rawCommand.trim();
   if (trimmed.length === 0) {
@@ -148,55 +199,19 @@ export function findBlockedToken(rawCommand: string): string | null {
   const commandsToInspect = segments.length > 1 ? [trimmed, ...segments] : [trimmed];
 
   for (const cmd of commandsToInspect) {
-    if (/\bgit\s+reset\s+--hard\b/.test(cmd)) {
-      return "git reset --hard";
+    const catastrophic = checkCatastrophicCommands(cmd);
+    if (catastrophic) {
+      return catastrophic;
     }
 
-    const mkfsMatch = cmd.match(/\b(mkfs(?:\.[a-zA-Z0-9_-]+)?)\b/);
-    if (mkfsMatch?.[1]) {
-      return mkfsMatch[1];
+    const chmodOrDd = checkChmodAndDd(cmd);
+    if (chmodOrDd) {
+      return chmodOrDd;
     }
 
-    const rmMatch = cmd.match(RM_RECURSIVE_PATTERN);
-    if (rmMatch) {
-      const flagPart = rmMatch[1]?.trim() ?? "-rf";
-      const targetArgs = rmMatch[2]?.trim() ?? "";
-      if (CATASTROPHIC_TARGET_PATTERN.test(targetArgs)) {
-        return `rm ${flagPart}`;
-      }
-    }
-
-    const chmodMatch = cmd.match(
-      /\bchmod\s+(?:(-R\s+0?777)|(0?777\s+-R)|(-R\s+a\+rwx)|(a\+rwx\s+-R)|(0?777)|(a\+rwx))\b/,
-    );
-    if (chmodMatch) {
-      const matchedFlags =
-        chmodMatch[1] ??
-        chmodMatch[2] ??
-        chmodMatch[3] ??
-        chmodMatch[4] ??
-        chmodMatch[5] ??
-        chmodMatch[6];
-      return `chmod ${matchedFlags}`;
-    }
-
-    const tokens = cmd.split(/\s+/);
-    let commandIndex = 0;
-    while (
-      commandIndex < tokens.length &&
-      WRAPPER_PREFIXES.has(tokens[commandIndex])
-    ) {
-      commandIndex += 1;
-    }
-
-    if (tokens[commandIndex] === "dd") {
-      return "dd";
-    }
-
-    for (const exploit of EXPLOIT_PATTERNS) {
-      if (exploit.pattern.test(cmd)) {
-        return exploit.token;
-      }
+    const exploit = checkExploits(cmd);
+    if (exploit) {
+      return exploit;
     }
   }
 

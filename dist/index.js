@@ -93,6 +93,19 @@ var EXPLOIT_PATTERNS = [
     token: "git config command execution"
   }
 ];
+function detectSeparatorLength(char, nextChar) {
+  if (char === `
+` || char === "\r" || char === ";") {
+    return 1;
+  }
+  if (char === "&" && nextChar === "&" || char === "|" && nextChar === "|") {
+    return 2;
+  }
+  if (char === "|") {
+    return 1;
+  }
+  return 0;
+}
 function splitCommandChain(command) {
   const trimmed = command.trim();
   if (trimmed.length === 0) {
@@ -126,35 +139,13 @@ function splitCommandChain(command) {
       continue;
     }
     if (!inSingleQuote && !inDoubleQuote) {
-      if (char === `
-` || char === "\r" || char === ";") {
+      const sepLen = detectSeparatorLength(char, trimmed[i + 1]);
+      if (sepLen > 0) {
         if (current.trim().length > 0) {
           segments.push(current.trim());
         }
         current = "";
-        continue;
-      }
-      if (char === "&" && trimmed[i + 1] === "&") {
-        if (current.trim().length > 0) {
-          segments.push(current.trim());
-        }
-        current = "";
-        i++;
-        continue;
-      }
-      if (char === "|" && trimmed[i + 1] === "|") {
-        if (current.trim().length > 0) {
-          segments.push(current.trim());
-        }
-        current = "";
-        i++;
-        continue;
-      }
-      if (char === "|") {
-        if (current.trim().length > 0) {
-          segments.push(current.trim());
-        }
-        current = "";
+        i += sepLen - 1;
         continue;
       }
     }
@@ -165,6 +156,48 @@ function splitCommandChain(command) {
   }
   return segments;
 }
+function checkCatastrophicCommands(cmd) {
+  if (/\bgit\s+reset\s+--hard\b/.test(cmd)) {
+    return "git reset --hard";
+  }
+  const mkfsMatch = cmd.match(/\b(mkfs(?:\.[a-zA-Z0-9_-]+)?)\b/);
+  if (mkfsMatch?.[1]) {
+    return mkfsMatch[1];
+  }
+  const rmMatch = cmd.match(RM_RECURSIVE_PATTERN);
+  if (rmMatch) {
+    const flagPart = rmMatch[1]?.trim() ?? "-rf";
+    const targetArgs = rmMatch[2]?.trim() ?? "";
+    if (CATASTROPHIC_TARGET_PATTERN.test(targetArgs)) {
+      return `rm ${flagPart}`;
+    }
+  }
+  return null;
+}
+function checkChmodAndDd(cmd) {
+  const chmodMatch = cmd.match(/\bchmod\s+(?:(-R\s+0?777)|(0?777\s+-R)|(-R\s+a\+rwx)|(a\+rwx\s+-R)|(0?777)|(a\+rwx))\b/);
+  if (chmodMatch) {
+    const matchedFlags = chmodMatch[1] ?? chmodMatch[2] ?? chmodMatch[3] ?? chmodMatch[4] ?? chmodMatch[5] ?? chmodMatch[6];
+    return `chmod ${matchedFlags}`;
+  }
+  const tokens = cmd.split(/\s+/);
+  let commandIndex = 0;
+  while (commandIndex < tokens.length && WRAPPER_PREFIXES.has(tokens[commandIndex])) {
+    commandIndex += 1;
+  }
+  if (tokens[commandIndex] === "dd") {
+    return "dd";
+  }
+  return null;
+}
+function checkExploits(cmd) {
+  for (const exploit of EXPLOIT_PATTERNS) {
+    if (exploit.pattern.test(cmd)) {
+      return exploit.token;
+    }
+  }
+  return null;
+}
 function findBlockedToken(rawCommand) {
   const trimmed = rawCommand.trim();
   if (trimmed.length === 0) {
@@ -173,38 +206,17 @@ function findBlockedToken(rawCommand) {
   const segments = splitCommandChain(trimmed);
   const commandsToInspect = segments.length > 1 ? [trimmed, ...segments] : [trimmed];
   for (const cmd of commandsToInspect) {
-    if (/\bgit\s+reset\s+--hard\b/.test(cmd)) {
-      return "git reset --hard";
+    const catastrophic = checkCatastrophicCommands(cmd);
+    if (catastrophic) {
+      return catastrophic;
     }
-    const mkfsMatch = cmd.match(/\b(mkfs(?:\.[a-zA-Z0-9_-]+)?)\b/);
-    if (mkfsMatch?.[1]) {
-      return mkfsMatch[1];
+    const chmodOrDd = checkChmodAndDd(cmd);
+    if (chmodOrDd) {
+      return chmodOrDd;
     }
-    const rmMatch = cmd.match(RM_RECURSIVE_PATTERN);
-    if (rmMatch) {
-      const flagPart = rmMatch[1]?.trim() ?? "-rf";
-      const targetArgs = rmMatch[2]?.trim() ?? "";
-      if (CATASTROPHIC_TARGET_PATTERN.test(targetArgs)) {
-        return `rm ${flagPart}`;
-      }
-    }
-    const chmodMatch = cmd.match(/\bchmod\s+(?:(-R\s+0?777)|(0?777\s+-R)|(-R\s+a\+rwx)|(a\+rwx\s+-R)|(0?777)|(a\+rwx))\b/);
-    if (chmodMatch) {
-      const matchedFlags = chmodMatch[1] ?? chmodMatch[2] ?? chmodMatch[3] ?? chmodMatch[4] ?? chmodMatch[5] ?? chmodMatch[6];
-      return `chmod ${matchedFlags}`;
-    }
-    const tokens = cmd.split(/\s+/);
-    let commandIndex = 0;
-    while (commandIndex < tokens.length && WRAPPER_PREFIXES.has(tokens[commandIndex])) {
-      commandIndex += 1;
-    }
-    if (tokens[commandIndex] === "dd") {
-      return "dd";
-    }
-    for (const exploit of EXPLOIT_PATTERNS) {
-      if (exploit.pattern.test(cmd)) {
-        return exploit.token;
-      }
+    const exploit = checkExploits(cmd);
+    if (exploit) {
+      return exploit;
     }
   }
   return null;
@@ -334,6 +346,38 @@ function matchesPrefix(command, prefix) {
   }
   return command.startsWith(`${prefix} `);
 }
+function findPrefixRuleMatch(segments, trimmed, prefixes) {
+  for (const seg of segments) {
+    for (const prefix of prefixes) {
+      if (matchesPrefix(seg, prefix)) {
+        return `command(${prefix})`;
+      }
+    }
+  }
+  for (const prefix of prefixes) {
+    if (matchesPrefix(trimmed, prefix)) {
+      return `command(${prefix})`;
+    }
+  }
+  return null;
+}
+function findAllowChainMatch(segments, allowPrefixes) {
+  const matchedRules = [];
+  for (const seg of segments) {
+    let segmentAllowed = false;
+    for (const prefix of allowPrefixes) {
+      if (matchesPrefix(seg, prefix)) {
+        matchedRules.push(`command(${prefix})`);
+        segmentAllowed = true;
+        break;
+      }
+    }
+    if (!segmentAllowed) {
+      return null;
+    }
+  }
+  return matchedRules.length > 0 ? matchedRules.join(" && ") : null;
+}
 function evaluateSettingsPermission(command, permissions) {
   const trimmed = command.trim();
   if (trimmed.length === 0) {
@@ -343,46 +387,17 @@ function evaluateSettingsPermission(command, permissions) {
   if (segments.length === 0) {
     return null;
   }
-  for (const seg of segments) {
-    for (const prefix of permissions.deny) {
-      if (matchesPrefix(seg, prefix)) {
-        return { decision: "deny", rule: `command(${prefix})` };
-      }
-    }
+  const denyRule = findPrefixRuleMatch(segments, trimmed, permissions.deny);
+  if (denyRule) {
+    return { decision: "deny", rule: denyRule };
   }
-  for (const prefix of permissions.deny) {
-    if (matchesPrefix(trimmed, prefix)) {
-      return { decision: "deny", rule: `command(${prefix})` };
-    }
+  const askRule = findPrefixRuleMatch(segments, trimmed, permissions.ask);
+  if (askRule) {
+    return { decision: "ask", rule: askRule };
   }
-  for (const seg of segments) {
-    for (const prefix of permissions.ask) {
-      if (matchesPrefix(seg, prefix)) {
-        return { decision: "ask", rule: `command(${prefix})` };
-      }
-    }
-  }
-  for (const prefix of permissions.ask) {
-    if (matchesPrefix(trimmed, prefix)) {
-      return { decision: "ask", rule: `command(${prefix})` };
-    }
-  }
-  const matchedAllowRules = [];
-  for (const seg of segments) {
-    let segmentAllowed = false;
-    for (const prefix of permissions.allow) {
-      if (matchesPrefix(seg, prefix)) {
-        matchedAllowRules.push(`command(${prefix})`);
-        segmentAllowed = true;
-        break;
-      }
-    }
-    if (!segmentAllowed) {
-      return null;
-    }
-  }
-  if (matchedAllowRules.length > 0) {
-    return { decision: "allow", rule: matchedAllowRules.join(" && ") };
+  const allowRule = findAllowChainMatch(segments, permissions.allow);
+  if (allowRule) {
+    return { decision: "allow", rule: allowRule };
   }
   return null;
 }
@@ -412,22 +427,40 @@ function formatBadge(tier, status, intent, detail) {
   const prefix = tier === "RED" ? "Blocked high-risk command" : tier === "YELLOW" ? "Needs review" : "Allowed safe command";
   return `${prefix}: ${detail} [${tier} - ${status}] (intent: ${intent})`;
 }
+function collectRedReasons(judgment, outsideTriggered, isReadOnly) {
+  const reasons = [];
+  if (judgment.destructive.noul >= 0.7) {
+    reasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.70`);
+  }
+  if (outsideTriggered && !isReadOnly) {
+    reasons.push(`outside workspace probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60`);
+  }
+  if (judgment.severity.score >= 2.5) {
+    reasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 2.5`);
+  }
+  return reasons;
+}
+function collectYellowReasons(judgment, outsideTriggered, isReadOnly, category) {
+  const reasons = [];
+  if (judgment.severity.score >= 1) {
+    reasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 1.0`);
+  }
+  if (judgment.destructive.noul >= 0.3) {
+    reasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.30`);
+  }
+  if (outsideTriggered && isReadOnly) {
+    reasons.push(`read-only query outside workspace (probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60)`);
+  }
+  if (MUTATION_CATEGORIES.includes(category)) {
+    reasons.push(`mutating intent category (${category})`);
+  }
+  return reasons;
+}
 function evaluateRiskTier(judgment) {
   const category = judgment.intent_category.choice;
   const isReadOnly = category === "read_only_query";
-  const outsideWorkspaceTriggered = judgment.outside_workspace.noul >= 0.6;
-  const redReasons = [];
-  if (judgment.destructive.noul >= 0.7) {
-    redReasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.70`);
-  }
-  if (outsideWorkspaceTriggered) {
-    if (!isReadOnly) {
-      redReasons.push(`outside workspace probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60`);
-    }
-  }
-  if (judgment.severity.score >= 2.5) {
-    redReasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 2.5`);
-  }
+  const outsideTriggered = judgment.outside_workspace.noul >= 0.6;
+  const redReasons = collectRedReasons(judgment, outsideTriggered, isReadOnly);
   if (redReasons.length > 0) {
     const detail = `High risk operation: ${redReasons.join(", ")}`;
     return {
@@ -437,19 +470,7 @@ function evaluateRiskTier(judgment) {
       reason: formatBadge("RED", "DENIED", category, detail)
     };
   }
-  const yellowReasons = [];
-  if (judgment.severity.score >= 1) {
-    yellowReasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 1.0`);
-  }
-  if (judgment.destructive.noul >= 0.3) {
-    yellowReasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.30`);
-  }
-  if (outsideWorkspaceTriggered && isReadOnly) {
-    yellowReasons.push(`read-only query outside workspace (probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60)`);
-  }
-  if (MUTATION_CATEGORIES.includes(category)) {
-    yellowReasons.push(`mutating intent category (${category})`);
-  }
+  const yellowReasons = collectYellowReasons(judgment, outsideTriggered, isReadOnly, category);
   if (yellowReasons.length > 0) {
     const detail = `Requires review: ${yellowReasons.join(", ")}`;
     return {
@@ -542,16 +563,8 @@ class TimeoutError extends Error {
     this.name = "TimeoutError";
   }
 }
-async function handlePreToolUse(input, env) {
-  const toolName = input.tool_name ?? input.toolCall?.name;
-  const startTime = env?.now ? env.now().getTime() : Date.now();
-  const rawCwd = input.arguments?.Cwd ?? input.arguments?.cwd ?? input.toolCall?.args?.Cwd ?? input.toolCall?.args?.cwd;
-  const cwd = typeof rawCwd === "string" && rawCwd.trim().length > 0 ? rawCwd.trim() : undefined;
-  const rawWorkspaceRoot = input.context?.workspace_root ?? input.workspacePaths?.[0];
-  const workspace_root = typeof rawWorkspaceRoot === "string" && rawWorkspaceRoot.trim().length > 0 ? rawWorkspaceRoot.trim() : undefined;
-  const rawCommand = input.arguments?.CommandLine ?? input.arguments?.command ?? input.arguments?.cmd ?? input.toolCall?.args?.CommandLine ?? input.toolCall?.args?.command ?? input.toolCall?.args?.cmd;
-  const command = typeof rawCommand === "string" ? rawCommand.trim() : "";
-  const respond = async (response, meta) => {
+function createResponder(command, cwd, workspace_root, startTime, env) {
+  return async (response, meta) => {
     const finalDecision = response.decision === "ask" ? "force_ask" : response.decision;
     const finalResponse = {
       decision: finalDecision,
@@ -579,24 +592,96 @@ async function handlePreToolUse(input, env) {
     }
     return finalResponse;
   };
-  if (toolName && FILE_MUTATION_TOOLS.has(toolName)) {
-    const rawTarget = input.arguments?.TargetFile ?? input.arguments?.AbsolutePath ?? input.arguments?.path ?? input.arguments?.DirectoryPath ?? input.toolCall?.args?.TargetFile ?? input.toolCall?.args?.AbsolutePath ?? input.toolCall?.args?.path ?? input.toolCall?.args?.DirectoryPath;
-    const targetPath = typeof rawTarget === "string" ? rawTarget.trim() : "";
-    if (targetPath.length === 0) {
+}
+async function handleFileMutation(toolName, input, workspace_root, respond) {
+  const rawTarget = input.arguments?.TargetFile ?? input.arguments?.AbsolutePath ?? input.arguments?.path ?? input.arguments?.DirectoryPath ?? input.toolCall?.args?.TargetFile ?? input.toolCall?.args?.AbsolutePath ?? input.toolCall?.args?.path ?? input.toolCall?.args?.DirectoryPath;
+  const targetPath = typeof rawTarget === "string" ? rawTarget.trim() : "";
+  if (targetPath.length === 0) {
+    return respond({
+      decision: "force_ask",
+      reason: formatBadge("YELLOW", "REVIEW", "file_modification", "No target file path specified")
+    });
+  }
+  const artifactDir = input.context?.artifact_directory ?? input.artifactDirectoryPath;
+  const fileEval = evaluateFileMutationTool(toolName, targetPath, {
+    workspaceRoot: workspace_root,
+    artifactDirectory: artifactDir
+  });
+  return respond({
+    decision: fileEval.decision,
+    reason: fileEval.reason
+  }, { command: `${toolName} ${targetPath}` });
+}
+async function handleSettingsEvaluation(command, env, respond) {
+  const settingsRaw = env?.readSettings ? env.readSettings() : loadDefaultSettings();
+  if (!settingsRaw) {
+    return null;
+  }
+  const parsedPermissions = parseSettingsPermissions(settingsRaw);
+  const settingsMatch = evaluateSettingsPermission(command, parsedPermissions);
+  if (!settingsMatch) {
+    return null;
+  }
+  const tier = settingsMatch.decision === "deny" ? "RED" : settingsMatch.decision === "allow" ? "GREEN" : "YELLOW";
+  const status = tier === "RED" ? "DENIED" : tier === "GREEN" ? "ALLOWED" : "REVIEW";
+  return respond({
+    decision: settingsMatch.decision,
+    reason: formatBadge(tier, status, "user_preference", `Native settings ${settingsMatch.decision} rule: ${settingsMatch.rule}`)
+  }, { tier });
+}
+async function handleJevEvaluation(input, env, respond) {
+  const context = buildCommandContext(input);
+  const timeoutMs = env.timeoutMs ?? 3000;
+  let timer;
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new TimeoutError(`Evaluation exceeded ${timeoutMs}ms budget`));
+      }, timeoutMs);
+      if (typeof timer.unref === "function") {
+        timer.unref();
+      }
+    });
+    const judgment = await Promise.race([
+      env.jevClient.evaluate(context),
+      timeoutPromise
+    ]);
+    clearTimeout(timer);
+    const evaluation = evaluateRiskTier(judgment);
+    return respond({
+      decision: evaluation.decision,
+      reason: evaluation.reason
+    }, {
+      tier: evaluation.tier,
+      scores: judgment
+    });
+  } catch (error) {
+    clearTimeout(timer);
+    if (error instanceof TimeoutError) {
       return respond({
         decision: "force_ask",
-        reason: formatBadge("YELLOW", "REVIEW", "file_modification", "No target file path specified")
-      });
+        reason: formatBadge("YELLOW", "REVIEW", "timeout_fallback", `Evaluation exceeded ${timeoutMs}ms budget`)
+      }, { tier: "YELLOW" });
     }
-    const artifactDir = input.context?.artifact_directory ?? input.artifactDirectoryPath;
-    const fileEval = evaluateFileMutationTool(toolName, targetPath, {
-      workspaceRoot: workspace_root,
-      artifactDirectory: artifactDir
-    });
+    const message = error instanceof Error ? error.message : String(error);
     return respond({
-      decision: fileEval.decision,
-      reason: fileEval.reason
-    }, { command: `${toolName} ${targetPath}` });
+      decision: "ask",
+      reason: formatBadge("YELLOW", "REVIEW", "error_fallback", `Evaluation error: ${message}`)
+    }, { tier: "YELLOW" });
+  }
+}
+async function handlePreToolUse(input, env) {
+  const toolName = input.tool_name ?? input.toolCall?.name;
+  const startTime = env?.now ? env.now().getTime() : Date.now();
+  const rawCwd = input.arguments?.Cwd ?? input.arguments?.cwd ?? input.toolCall?.args?.Cwd ?? input.toolCall?.args?.cwd;
+  const cwd = typeof rawCwd === "string" && rawCwd.trim().length > 0 ? rawCwd.trim() : undefined;
+  const rawWorkspaceRoot = input.context?.workspace_root ?? input.workspacePaths?.[0];
+  const workspace_root = typeof rawWorkspaceRoot === "string" && rawWorkspaceRoot.trim().length > 0 ? rawWorkspaceRoot.trim() : undefined;
+  const rawCommand = input.arguments?.CommandLine ?? input.arguments?.command ?? input.arguments?.cmd ?? input.toolCall?.args?.CommandLine ?? input.toolCall?.args?.command ?? input.toolCall?.args?.cmd;
+  const command = typeof rawCommand === "string" ? rawCommand.trim() : "";
+  const respond = createResponder(command, cwd, workspace_root, startTime, env);
+  if (toolName && FILE_MUTATION_TOOLS.has(toolName)) {
+    return handleFileMutation(toolName, input, workspace_root, respond);
   }
   if (toolName !== "run_command") {
     return { decision: "allow" };
@@ -614,30 +699,9 @@ async function handlePreToolUse(input, env) {
       reason: formatBadge("RED", "DENIED", "destructive_deletion", `Blocked command token detected: ${blockedToken}`)
     }, { tier: "RED" });
   }
-  const settingsRaw = env?.readSettings ? env.readSettings() : loadDefaultSettings();
-  if (settingsRaw) {
-    const parsedPermissions = parseSettingsPermissions(settingsRaw);
-    const settingsMatch = evaluateSettingsPermission(command, parsedPermissions);
-    if (settingsMatch) {
-      if (settingsMatch.decision === "deny") {
-        return respond({
-          decision: "deny",
-          reason: formatBadge("RED", "DENIED", "user_preference", `Native settings deny rule: ${settingsMatch.rule}`)
-        }, { tier: "RED" });
-      }
-      if (settingsMatch.decision === "ask") {
-        return respond({
-          decision: "ask",
-          reason: formatBadge("YELLOW", "REVIEW", "user_preference", `Native settings ask rule: ${settingsMatch.rule}`)
-        }, { tier: "YELLOW" });
-      }
-      if (settingsMatch.decision === "allow") {
-        return respond({
-          decision: "allow",
-          reason: formatBadge("GREEN", "ALLOWED", "user_preference", `Native settings allow rule: ${settingsMatch.rule}`)
-        }, { tier: "GREEN" });
-      }
-    }
+  const settingsResponse = await handleSettingsEvaluation(command, env, respond);
+  if (settingsResponse) {
+    return settingsResponse;
   }
   if (isFastPathAllowed(command)) {
     return respond({
@@ -646,45 +710,7 @@ async function handlePreToolUse(input, env) {
     }, { tier: "GREEN" });
   }
   if (env?.jevClient) {
-    const context = buildCommandContext(input);
-    const timeoutMs = env.timeoutMs ?? 3000;
-    let timer;
-    try {
-      const timeoutPromise = new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          reject(new TimeoutError(`Evaluation exceeded ${timeoutMs}ms budget`));
-        }, timeoutMs);
-        if (typeof timer.unref === "function") {
-          timer.unref();
-        }
-      });
-      const judgment = await Promise.race([
-        env.jevClient.evaluate(context),
-        timeoutPromise
-      ]);
-      clearTimeout(timer);
-      const evaluation = evaluateRiskTier(judgment);
-      return respond({
-        decision: evaluation.decision,
-        reason: evaluation.reason
-      }, {
-        tier: evaluation.tier,
-        scores: judgment
-      });
-    } catch (error) {
-      clearTimeout(timer);
-      if (error instanceof TimeoutError) {
-        return respond({
-          decision: "force_ask",
-          reason: formatBadge("YELLOW", "REVIEW", "timeout_fallback", `Evaluation exceeded ${timeoutMs}ms budget`)
-        }, { tier: "YELLOW" });
-      }
-      const message = error instanceof Error ? error.message : String(error);
-      return respond({
-        decision: "ask",
-        reason: formatBadge("YELLOW", "REVIEW", "error_fallback", `Evaluation error: ${message}`)
-      }, { tier: "YELLOW" });
-    }
+    return handleJevEvaluation(input, env, respond);
   }
   return respond({
     decision: "ask",

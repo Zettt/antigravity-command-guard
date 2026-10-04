@@ -124,5 +124,15 @@ describe("evaluateSettingsPermission", () => {
       );
       expect(res).toBeNull();
     });
+
+    it("returns null for empty command or whitespace string", () => {
+      expect(evaluateSettingsPermission("", permissions)).toBeNull();
+      expect(evaluateSettingsPermission("   ", permissions)).toBeNull();
+    });
+
+    it("handles multiple spaces and preserves prefix matching boundaries", () => {
+      const res = evaluateSettingsPermission("rtk   ls", permissions);
+      expect(res).toBeNull();
+    });
   });
 });
