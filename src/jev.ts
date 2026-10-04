@@ -142,20 +142,24 @@ export function createJevClient(options?: JevClientOptions): JevClient {
   if (endpoint.endsWith("/v1/battery")) {
     endpoint = endpoint.replace(/\/v1\/battery$/, "/v1/systemone");
   }
-  const apiKey = options?.apiKey ?? process.env.TYPESAFE_API_KEY ?? "";
+  const apiKey = (options?.apiKey ?? process.env.TYPESAFE_API_KEY ?? "").trim();
   const fetchFn = options?.fetchFn ?? fetch;
 
   return {
     async evaluate(
       context: CommandContextState,
     ): Promise<JevJudgmentBatteryResult> {
+      if (apiKey.length === 0) {
+        throw new Error(
+          "TypeSafe Jev API key not configured. Set TYPESAFE_API_KEY environment variable or apiKey in config.json.",
+        );
+      }
+
       const payload = buildJevBatteryRequest(context);
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
       };
-      if (apiKey.length > 0) {
-        headers.Authorization = `Bearer ${apiKey}`;
-      }
 
       const response = await fetchFn(endpoint, {
         method: "POST",

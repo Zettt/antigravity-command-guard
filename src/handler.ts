@@ -9,6 +9,7 @@ import {
 } from "./settings.ts";
 import { evaluateFileMutationTool } from "./fs-guard.ts";
 import { evaluateRiskTier, formatBadge } from "./policy.ts";
+import { VERSION } from "./version.ts";
 import type {
   AuditLogEntry,
   Environment,
@@ -85,11 +86,11 @@ export async function handlePreToolUse(
 
     const resolvedTier =
       meta?.tier ??
-      (response.reason?.startsWith("[RED")
+      (response.reason?.includes("[RED")
         ? "RED"
-        : response.reason?.startsWith("[YELLOW")
+        : response.reason?.includes("[YELLOW")
           ? "YELLOW"
-          : response.reason?.startsWith("[GREEN")
+          : response.reason?.includes("[GREEN")
             ? "GREEN"
             : undefined);
 
@@ -128,7 +129,12 @@ export async function handlePreToolUse(
     if (targetPath.length === 0) {
       return respond({
         decision: "force_ask",
-        reason: "[YELLOW - REVIEW] Intent: file_modification | Detail: No target file path specified",
+        reason: formatBadge(
+          "YELLOW",
+          "REVIEW",
+          "file_modification",
+          "No target file path specified",
+        ),
       });
     }
 
@@ -158,7 +164,12 @@ export async function handlePreToolUse(
     return respond(
       {
         decision: "ask",
-        reason: "[YELLOW - REVIEW] Intent: unknown | Detail: No command string provided",
+        reason: formatBadge(
+          "YELLOW",
+          "REVIEW",
+          "unknown",
+          "No command string provided",
+        ),
       },
       { tier: "YELLOW", command: typeof rawCommand === "string" ? rawCommand : "" },
     );
@@ -169,7 +180,12 @@ export async function handlePreToolUse(
     return respond(
       {
         decision: "deny",
-        reason: `[RED - DENIED] Intent: destructive_deletion | Detail: Blocked command token detected: ${blockedToken}`,
+        reason: formatBadge(
+          "RED",
+          "DENIED",
+          "destructive_deletion",
+          `Blocked command token detected: ${blockedToken}`,
+        ),
       },
       { tier: "RED" },
     );
@@ -184,7 +200,12 @@ export async function handlePreToolUse(
         return respond(
           {
             decision: "deny",
-            reason: `[RED - DENIED] Intent: user_preference | Detail: Native settings deny rule: ${settingsMatch.rule}`,
+            reason: formatBadge(
+              "RED",
+              "DENIED",
+              "user_preference",
+              `Native settings deny rule: ${settingsMatch.rule}`,
+            ),
           },
           { tier: "RED" },
         );
@@ -193,7 +214,12 @@ export async function handlePreToolUse(
         return respond(
           {
             decision: "ask",
-            reason: `[YELLOW - REVIEW] Intent: user_preference | Detail: Native settings ask rule: ${settingsMatch.rule}`,
+            reason: formatBadge(
+              "YELLOW",
+              "REVIEW",
+              "user_preference",
+              `Native settings ask rule: ${settingsMatch.rule}`,
+            ),
           },
           { tier: "YELLOW" },
         );
@@ -202,7 +228,12 @@ export async function handlePreToolUse(
         return respond(
           {
             decision: "allow",
-            reason: `[GREEN - ALLOWED] Intent: user_preference | Detail: Native settings allow rule: ${settingsMatch.rule}`,
+            reason: formatBadge(
+              "GREEN",
+              "ALLOWED",
+              "user_preference",
+              `Native settings allow rule: ${settingsMatch.rule}`,
+            ),
           },
           { tier: "GREEN" },
         );
@@ -214,7 +245,12 @@ export async function handlePreToolUse(
     return respond(
       {
         decision: "allow",
-        reason: "[GREEN - ALLOWED] Intent: read_only_query | Detail: Static fast-path pass",
+        reason: formatBadge(
+          "GREEN",
+          "ALLOWED",
+          "read_only_query",
+          "Static fast-path pass",
+        ),
       },
       { tier: "GREEN" },
     );
@@ -222,7 +258,7 @@ export async function handlePreToolUse(
 
   if (env?.jevClient) {
     const context = buildCommandContext(input);
-    const timeoutMs = env.timeoutMs ?? 1500;
+    const timeoutMs = env.timeoutMs ?? 3000;
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -287,7 +323,12 @@ export async function handlePreToolUse(
   return respond(
     {
       decision: "ask",
-      reason: "[YELLOW - REVIEW] Intent: pending_evaluation | Detail: Command pending semantic evaluation",
+      reason: formatBadge(
+        "YELLOW",
+        "REVIEW",
+        "pending_evaluation",
+        `Command pending semantic evaluation (v${VERSION})`,
+      ),
     },
     { tier: "YELLOW" },
   );

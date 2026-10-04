@@ -18,7 +18,13 @@ export function formatBadge(
   intent: string,
   detail: string,
 ): string {
-  return `[${tier} - ${status}] Intent: ${intent} | Detail: ${detail}`;
+  const prefix =
+    tier === "RED"
+      ? "Blocked high-risk command"
+      : tier === "YELLOW"
+        ? "Needs review"
+        : "Allowed safe command";
+  return `${prefix}: ${detail} [${tier} - ${status}] (intent: ${intent})`;
 }
 
 export function evaluateRiskTier(
@@ -26,17 +32,25 @@ export function evaluateRiskTier(
 ): RiskTierEvaluation {
   const category = judgment.intent_category.choice;
 
+  const isReadOnly = category === "read_only_query";
+  const outsideWorkspaceTriggered = judgment.outside_workspace.noul >= 0.6;
+
   const redReasons: string[] = [];
   if (judgment.destructive.noul >= 0.7) {
     redReasons.push(
       `destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.70`,
     );
   }
-  if (judgment.outside_workspace.noul >= 0.6) {
-    redReasons.push(
-      `outside workspace probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60`,
-    );
+
+  // If outside workspace is triggered, check if it is a safe read-only inspection
+  if (outsideWorkspaceTriggered) {
+    if (!isReadOnly) {
+      redReasons.push(
+        `outside workspace probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60`,
+      );
+    }
   }
+
   if (judgment.severity.score >= 2.5) {
     redReasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 2.5`);
   }
@@ -60,6 +74,11 @@ export function evaluateRiskTier(
   if (judgment.destructive.noul >= 0.3) {
     yellowReasons.push(
       `destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.30`,
+    );
+  }
+  if (outsideWorkspaceTriggered && isReadOnly) {
+    yellowReasons.push(
+      `read-only query outside workspace (probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60)`,
     );
   }
   if (MUTATION_CATEGORIES.includes(category)) {

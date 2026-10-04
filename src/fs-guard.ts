@@ -1,4 +1,5 @@
 import { isAbsolute, normalize, relative, resolve } from "node:path";
+import { formatBadge } from "./policy.ts";
 
 export const SENSITIVE_PATH_PATTERNS = [
   /(^|[/\\])\.env(\.[a-zA-Z0-9_-]+)?$/i,
@@ -41,14 +42,24 @@ export function evaluateFileMutationTool(
   if (options.artifactDirectory && isPathInside(normalizedTarget, options.artifactDirectory)) {
     return {
       decision: "allow",
-      reason: "[GREEN - ALLOWED] Intent: artifact_generation | Detail: Auto-approved agent artifact mutation",
+      reason: formatBadge(
+        "GREEN",
+        "ALLOWED",
+        "artifact_generation",
+        "Auto-approved agent artifact mutation",
+      ),
     };
   }
 
   if (normalizedTarget.includes(".gemini/antigravity/brain/")) {
     return {
       decision: "allow",
-      reason: "[GREEN - ALLOWED] Intent: artifact_generation | Detail: Auto-approved agent artifact mutation",
+      reason: formatBadge(
+        "GREEN",
+        "ALLOWED",
+        "artifact_generation",
+        "Auto-approved agent artifact mutation",
+      ),
     };
   }
 
@@ -56,7 +67,12 @@ export function evaluateFileMutationTool(
     if (pattern.test(normalizedTarget)) {
       return {
         decision: "force_ask",
-        reason: `[YELLOW - REVIEW] Intent: sensitive_target | Detail: Mutating sensitive target: ${normalizedTarget}`,
+        reason: formatBadge(
+          "YELLOW",
+          "REVIEW",
+          "sensitive_target",
+          `Mutating sensitive target: ${normalizedTarget}`,
+        ),
       };
     }
   }
@@ -65,13 +81,23 @@ export function evaluateFileMutationTool(
     if (!isPathInside(normalizedTarget, options.workspaceRoot)) {
       return {
         decision: "force_ask",
-        reason: `[YELLOW - REVIEW] Intent: outside_workspace | Detail: Operation targets path outside active workspace: ${normalizedTarget}`,
+        reason: formatBadge(
+          "YELLOW",
+          "REVIEW",
+          "outside_workspace",
+          `Operation targets path outside active workspace: ${normalizedTarget}`,
+        ),
       };
     }
   }
 
   return {
     decision: "allow",
-    reason: "[GREEN - ALLOWED] Intent: file_modification | Detail: Safe intra-workspace file mutation",
+    reason: formatBadge(
+      "GREEN",
+      "ALLOWED",
+      "file_modification",
+      "Safe intra-workspace file mutation",
+    ),
   };
 }

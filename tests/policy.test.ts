@@ -11,7 +11,7 @@ describe("formatBadge", () => {
       "High destructive risk",
     );
     expect(badge).toBe(
-      "[RED - DENIED] Intent: destructive_deletion | Detail: High destructive risk",
+      "Blocked high-risk command: High destructive risk [RED - DENIED] (intent: destructive_deletion)",
     );
   });
 
@@ -23,7 +23,7 @@ describe("formatBadge", () => {
       "Requires review",
     );
     expect(badge).toBe(
-      "[YELLOW - REVIEW] Intent: file_modification | Detail: Requires review",
+      "Needs review: Requires review [YELLOW - REVIEW] (intent: file_modification)",
     );
   });
 
@@ -35,7 +35,7 @@ describe("formatBadge", () => {
       "Low risk operation",
     );
     expect(badge).toBe(
-      "[GREEN - ALLOWED] Intent: read_only_query | Detail: Low risk operation",
+      "Allowed safe command: Low risk operation [GREEN - ALLOWED] (intent: read_only_query)",
     );
   });
 });
@@ -54,7 +54,6 @@ describe("evaluateRiskTier", () => {
       expect(result.tier).toBe("RED");
       expect(result.status).toBe("DENIED");
       expect(result.reason).toContain("[RED - DENIED]");
-      expect(result.reason).toContain("Intent: read_only_query");
       expect(result.reason).toContain("destructive");
     });
 
@@ -72,12 +71,12 @@ describe("evaluateRiskTier", () => {
       expect(result.reason).toContain("[RED - DENIED]");
     });
 
-    it("denies when outside_workspace probability >= 0.60 (exact boundary)", () => {
+    it("denies when outside_workspace probability >= 0.60 for non-read-only commands", () => {
       const judgment: JevJudgmentBatteryResult = {
         severity: { score: 0.5 },
         destructive: { noul: 0.1 },
         outside_workspace: { noul: 0.6 },
-        intent_category: { choice: "read_only_query" },
+        intent_category: { choice: "file_modification" },
       };
       const result = evaluateRiskTier(judgment);
       expect(result.decision).toBe("deny");
@@ -85,6 +84,21 @@ describe("evaluateRiskTier", () => {
       expect(result.status).toBe("DENIED");
       expect(result.reason).toContain("[RED - DENIED]");
       expect(result.reason).toContain("outside workspace");
+    });
+
+    it("escalates to yellow when outside_workspace probability >= 0.60 for read-only commands", () => {
+      const judgment: JevJudgmentBatteryResult = {
+        severity: { score: 0.5 },
+        destructive: { noul: 0.1 },
+        outside_workspace: { noul: 0.6 },
+        intent_category: { choice: "read_only_query" },
+      };
+      const result = evaluateRiskTier(judgment);
+      expect(result.decision).toBe("force_ask");
+      expect(result.tier).toBe("YELLOW");
+      expect(result.status).toBe("REVIEW");
+      expect(result.reason).toContain("[YELLOW - REVIEW]");
+      expect(result.reason).toContain("read-only query outside workspace");
     });
 
     it("denies when severity score >= 2.5 (exact boundary)", () => {
@@ -248,7 +262,7 @@ describe("evaluateRiskTier", () => {
       expect(result.tier).toBe("GREEN");
       expect(result.status).toBe("ALLOWED");
       expect(result.reason).toContain("[GREEN - ALLOWED]");
-      expect(result.reason).toContain("Intent: read_only_query");
+      expect(result.reason).toContain("(intent: read_only_query)");
     });
 
     it("allows low-risk build_and_test command", () => {
@@ -297,7 +311,7 @@ describe("evaluateRiskTier", () => {
   describe("Badge format compliance", () => {
     it("ensures all reasons conform to the standard badge regex pattern", () => {
       const badgeRegex =
-        /^\[(RED|YELLOW|GREEN) - (DENIED|REVIEW|ALLOWED)\] Intent: [a-z_]+ \| Detail: .+$/;
+        /^(Blocked high-risk command|Needs review|Allowed safe command): .+ \[(RED|YELLOW|GREEN) - (DENIED|REVIEW|ALLOWED)\] \(intent: [a-z_]+\)$/;
 
       const testCases: JevJudgmentBatteryResult[] = [
         {

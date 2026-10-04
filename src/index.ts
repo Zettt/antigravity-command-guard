@@ -1,9 +1,15 @@
 import { handlePreToolUse } from "./handler.ts";
 import type { PreToolUseInput } from "./types.ts";
-
 import { createJevClient } from "./jev.ts";
+import { loadPluginConfig, resolveRuntimeConfig } from "./config.ts";
 
-const defaultJevClient = createJevClient();
+const pluginConfig = loadPluginConfig();
+const runtimeConfig = resolveRuntimeConfig(pluginConfig);
+
+const defaultJevClient = createJevClient({
+  apiKey: runtimeConfig.apiKey,
+  endpoint: runtimeConfig.endpointUrl,
+});
 
 async function main(): Promise<void> {
   const chunks: Buffer[] = [];
@@ -16,7 +22,7 @@ async function main(): Promise<void> {
   if (rawInput.length === 0) {
     const defaultResponse = {
       decision: "force_ask",
-      reason: "[YELLOW - REVIEW] Intent: unknown | Detail: Empty hook input stream",
+      reason: "Needs review: Empty hook input stream [YELLOW - REVIEW] (intent: unknown)",
     };
     process.stdout.write(JSON.stringify(defaultResponse) + "\n");
     return;
@@ -24,12 +30,15 @@ async function main(): Promise<void> {
 
   try {
     const input = JSON.parse(rawInput) as PreToolUseInput;
-    const response = await handlePreToolUse(input, { jevClient: defaultJevClient });
+    const response = await handlePreToolUse(input, {
+      jevClient: defaultJevClient,
+      timeoutMs: runtimeConfig.timeoutMs,
+    });
     process.stdout.write(JSON.stringify(response) + "\n");
   } catch (error) {
     const fallbackResponse = {
       decision: "force_ask",
-      reason: `[YELLOW - REVIEW] Intent: parse_error | Detail: Failed parsing JSON input: ${String(error)}`,
+      reason: `Needs review: Failed parsing JSON input: ${String(error)} [YELLOW - REVIEW] (intent: parse_error)`,
     };
     process.stdout.write(JSON.stringify(fallbackResponse) + "\n");
   }

@@ -401,6 +401,74 @@ function loadDefaultSettings() {
 
 // src/fs-guard.ts
 import { isAbsolute, normalize, relative, resolve } from "path";
+
+// src/policy.ts
+var MUTATION_CATEGORIES = [
+  "file_modification",
+  "dependency_management",
+  "system_administration"
+];
+function formatBadge(tier, status, intent, detail) {
+  const prefix = tier === "RED" ? "Blocked high-risk command" : tier === "YELLOW" ? "Needs review" : "Allowed safe command";
+  return `${prefix}: ${detail} [${tier} - ${status}] (intent: ${intent})`;
+}
+function evaluateRiskTier(judgment) {
+  const category = judgment.intent_category.choice;
+  const isReadOnly = category === "read_only_query";
+  const outsideWorkspaceTriggered = judgment.outside_workspace.noul >= 0.6;
+  const redReasons = [];
+  if (judgment.destructive.noul >= 0.7) {
+    redReasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.70`);
+  }
+  if (outsideWorkspaceTriggered) {
+    if (!isReadOnly) {
+      redReasons.push(`outside workspace probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60`);
+    }
+  }
+  if (judgment.severity.score >= 2.5) {
+    redReasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 2.5`);
+  }
+  if (redReasons.length > 0) {
+    const detail = `High risk operation: ${redReasons.join(", ")}`;
+    return {
+      decision: "deny",
+      tier: "RED",
+      status: "DENIED",
+      reason: formatBadge("RED", "DENIED", category, detail)
+    };
+  }
+  const yellowReasons = [];
+  if (judgment.severity.score >= 1) {
+    yellowReasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 1.0`);
+  }
+  if (judgment.destructive.noul >= 0.3) {
+    yellowReasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.30`);
+  }
+  if (outsideWorkspaceTriggered && isReadOnly) {
+    yellowReasons.push(`read-only query outside workspace (probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60)`);
+  }
+  if (MUTATION_CATEGORIES.includes(category)) {
+    yellowReasons.push(`mutating intent category (${category})`);
+  }
+  if (yellowReasons.length > 0) {
+    const detail = `Requires review: ${yellowReasons.join(", ")}`;
+    return {
+      decision: "force_ask",
+      tier: "YELLOW",
+      status: "REVIEW",
+      reason: formatBadge("YELLOW", "REVIEW", category, detail)
+    };
+  }
+  const detail = `Low risk operation within safe thresholds (severity: ${judgment.severity.score.toFixed(1)})`;
+  return {
+    decision: "allow",
+    tier: "GREEN",
+    status: "ALLOWED",
+    reason: formatBadge("GREEN", "ALLOWED", category, detail)
+  };
+}
+
+// src/fs-guard.ts
 var SENSITIVE_PATH_PATTERNS = [
   /(^|[/\\])\.env(\.[a-zA-Z0-9_-]+)?$/i,
   /(^|[/\\])\.git([/\\]|$)/i,
@@ -427,20 +495,20 @@ function evaluateFileMutationTool(toolName, targetPath, options) {
   if (options.artifactDirectory && isPathInside(normalizedTarget, options.artifactDirectory)) {
     return {
       decision: "allow",
-      reason: "[GREEN - ALLOWED] Intent: artifact_generation | Detail: Auto-approved agent artifact mutation"
+      reason: formatBadge("GREEN", "ALLOWED", "artifact_generation", "Auto-approved agent artifact mutation")
     };
   }
   if (normalizedTarget.includes(".gemini/antigravity/brain/")) {
     return {
       decision: "allow",
-      reason: "[GREEN - ALLOWED] Intent: artifact_generation | Detail: Auto-approved agent artifact mutation"
+      reason: formatBadge("GREEN", "ALLOWED", "artifact_generation", "Auto-approved agent artifact mutation")
     };
   }
   for (const pattern of SENSITIVE_PATH_PATTERNS) {
     if (pattern.test(normalizedTarget)) {
       return {
         decision: "force_ask",
-        reason: `[YELLOW - REVIEW] Intent: sensitive_target | Detail: Mutating sensitive target: ${normalizedTarget}`
+        reason: formatBadge("YELLOW", "REVIEW", "sensitive_target", `Mutating sensitive target: ${normalizedTarget}`)
       };
     }
   }
@@ -448,73 +516,18 @@ function evaluateFileMutationTool(toolName, targetPath, options) {
     if (!isPathInside(normalizedTarget, options.workspaceRoot)) {
       return {
         decision: "force_ask",
-        reason: `[YELLOW - REVIEW] Intent: outside_workspace | Detail: Operation targets path outside active workspace: ${normalizedTarget}`
+        reason: formatBadge("YELLOW", "REVIEW", "outside_workspace", `Operation targets path outside active workspace: ${normalizedTarget}`)
       };
     }
   }
   return {
     decision: "allow",
-    reason: "[GREEN - ALLOWED] Intent: file_modification | Detail: Safe intra-workspace file mutation"
+    reason: formatBadge("GREEN", "ALLOWED", "file_modification", "Safe intra-workspace file mutation")
   };
 }
 
-// src/policy.ts
-var MUTATION_CATEGORIES = [
-  "file_modification",
-  "dependency_management",
-  "system_administration"
-];
-function formatBadge(tier, status, intent, detail) {
-  return `[${tier} - ${status}] Intent: ${intent} | Detail: ${detail}`;
-}
-function evaluateRiskTier(judgment) {
-  const category = judgment.intent_category.choice;
-  const redReasons = [];
-  if (judgment.destructive.noul >= 0.7) {
-    redReasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.70`);
-  }
-  if (judgment.outside_workspace.noul >= 0.6) {
-    redReasons.push(`outside workspace probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60`);
-  }
-  if (judgment.severity.score >= 2.5) {
-    redReasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 2.5`);
-  }
-  if (redReasons.length > 0) {
-    const detail = `High risk operation: ${redReasons.join(", ")}`;
-    return {
-      decision: "deny",
-      tier: "RED",
-      status: "DENIED",
-      reason: formatBadge("RED", "DENIED", category, detail)
-    };
-  }
-  const yellowReasons = [];
-  if (judgment.severity.score >= 1) {
-    yellowReasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 1.0`);
-  }
-  if (judgment.destructive.noul >= 0.3) {
-    yellowReasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.30`);
-  }
-  if (MUTATION_CATEGORIES.includes(category)) {
-    yellowReasons.push(`mutating intent category (${category})`);
-  }
-  if (yellowReasons.length > 0) {
-    const detail = `Requires review: ${yellowReasons.join(", ")}`;
-    return {
-      decision: "force_ask",
-      tier: "YELLOW",
-      status: "REVIEW",
-      reason: formatBadge("YELLOW", "REVIEW", category, detail)
-    };
-  }
-  const detail = `Low risk operation within safe thresholds (severity: ${judgment.severity.score.toFixed(1)})`;
-  return {
-    decision: "allow",
-    tier: "GREEN",
-    status: "ALLOWED",
-    reason: formatBadge("GREEN", "ALLOWED", category, detail)
-  };
-}
+// src/version.ts
+var VERSION = "0.2.0";
 
 // src/handler.ts
 var FILE_MUTATION_TOOLS = new Set([
@@ -547,7 +560,7 @@ async function handlePreToolUse(input, env) {
     const nowMs = env?.now ? env.now().getTime() : Date.now();
     const latency_ms = nowMs - startTime;
     const timestamp = ((env?.now) ? env.now() : new Date).toISOString();
-    const resolvedTier = meta?.tier ?? (response.reason?.startsWith("[RED") ? "RED" : response.reason?.startsWith("[YELLOW") ? "YELLOW" : response.reason?.startsWith("[GREEN") ? "GREEN" : undefined);
+    const resolvedTier = meta?.tier ?? (response.reason?.includes("[RED") ? "RED" : response.reason?.includes("[YELLOW") ? "YELLOW" : response.reason?.includes("[GREEN") ? "GREEN" : undefined);
     const auditEntry = {
       timestamp,
       command: meta?.command ?? command,
@@ -572,7 +585,7 @@ async function handlePreToolUse(input, env) {
     if (targetPath.length === 0) {
       return respond({
         decision: "force_ask",
-        reason: "[YELLOW - REVIEW] Intent: file_modification | Detail: No target file path specified"
+        reason: formatBadge("YELLOW", "REVIEW", "file_modification", "No target file path specified")
       });
     }
     const artifactDir = input.context?.artifact_directory ?? input.artifactDirectoryPath;
@@ -591,14 +604,14 @@ async function handlePreToolUse(input, env) {
   if (command.length === 0) {
     return respond({
       decision: "ask",
-      reason: "[YELLOW - REVIEW] Intent: unknown | Detail: No command string provided"
+      reason: formatBadge("YELLOW", "REVIEW", "unknown", "No command string provided")
     }, { tier: "YELLOW", command: typeof rawCommand === "string" ? rawCommand : "" });
   }
   const blockedToken = findBlockedToken(command);
   if (blockedToken) {
     return respond({
       decision: "deny",
-      reason: `[RED - DENIED] Intent: destructive_deletion | Detail: Blocked command token detected: ${blockedToken}`
+      reason: formatBadge("RED", "DENIED", "destructive_deletion", `Blocked command token detected: ${blockedToken}`)
     }, { tier: "RED" });
   }
   const settingsRaw = env?.readSettings ? env.readSettings() : loadDefaultSettings();
@@ -609,19 +622,19 @@ async function handlePreToolUse(input, env) {
       if (settingsMatch.decision === "deny") {
         return respond({
           decision: "deny",
-          reason: `[RED - DENIED] Intent: user_preference | Detail: Native settings deny rule: ${settingsMatch.rule}`
+          reason: formatBadge("RED", "DENIED", "user_preference", `Native settings deny rule: ${settingsMatch.rule}`)
         }, { tier: "RED" });
       }
       if (settingsMatch.decision === "ask") {
         return respond({
           decision: "ask",
-          reason: `[YELLOW - REVIEW] Intent: user_preference | Detail: Native settings ask rule: ${settingsMatch.rule}`
+          reason: formatBadge("YELLOW", "REVIEW", "user_preference", `Native settings ask rule: ${settingsMatch.rule}`)
         }, { tier: "YELLOW" });
       }
       if (settingsMatch.decision === "allow") {
         return respond({
           decision: "allow",
-          reason: `[GREEN - ALLOWED] Intent: user_preference | Detail: Native settings allow rule: ${settingsMatch.rule}`
+          reason: formatBadge("GREEN", "ALLOWED", "user_preference", `Native settings allow rule: ${settingsMatch.rule}`)
         }, { tier: "GREEN" });
       }
     }
@@ -629,12 +642,12 @@ async function handlePreToolUse(input, env) {
   if (isFastPathAllowed(command)) {
     return respond({
       decision: "allow",
-      reason: "[GREEN - ALLOWED] Intent: read_only_query | Detail: Static fast-path pass"
+      reason: formatBadge("GREEN", "ALLOWED", "read_only_query", "Static fast-path pass")
     }, { tier: "GREEN" });
   }
   if (env?.jevClient) {
     const context = buildCommandContext(input);
-    const timeoutMs = env.timeoutMs ?? 1500;
+    const timeoutMs = env.timeoutMs ?? 3000;
     let timer;
     try {
       const timeoutPromise = new Promise((_, reject) => {
@@ -675,7 +688,7 @@ async function handlePreToolUse(input, env) {
   }
   return respond({
     decision: "ask",
-    reason: "[YELLOW - REVIEW] Intent: pending_evaluation | Detail: Command pending semantic evaluation"
+    reason: formatBadge("YELLOW", "REVIEW", "pending_evaluation", `Command pending semantic evaluation (v${VERSION})`)
   }, { tier: "YELLOW" });
 }
 
@@ -757,17 +770,18 @@ function createJevClient(options) {
   if (endpoint.endsWith("/v1/battery")) {
     endpoint = endpoint.replace(/\/v1\/battery$/, "/v1/systemone");
   }
-  const apiKey = options?.apiKey ?? process.env.TYPESAFE_API_KEY ?? "";
+  const apiKey = (options?.apiKey ?? process.env.TYPESAFE_API_KEY ?? "").trim();
   const fetchFn = options?.fetchFn ?? fetch;
   return {
     async evaluate(context) {
+      if (apiKey.length === 0) {
+        throw new Error("TypeSafe Jev API key not configured. Set TYPESAFE_API_KEY environment variable or apiKey in config.json.");
+      }
       const payload = buildJevBatteryRequest(context);
       const headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
       };
-      if (apiKey.length > 0) {
-        headers.Authorization = `Bearer ${apiKey}`;
-      }
       const response = await fetchFn(endpoint, {
         method: "POST",
         headers,
@@ -783,8 +797,69 @@ function createJevClient(options) {
   };
 }
 
+// src/config.ts
+import { existsSync as existsSync3, readFileSync as readFileSync2 } from "fs";
+import { homedir as homedir2 } from "os";
+import { join as join3 } from "path";
+var DEFAULT_TIMEOUT_MS = 3000;
+var DEFAULT_ENDPOINT_URL = "https://api.typesafe.ai/v1/systemone";
+function getPluginConfigPath() {
+  return join3(homedir2(), ".gemini", "config", "plugins", "command-guard", "config.json");
+}
+function loadPluginConfig(customPath) {
+  const filePath = customPath ?? getPluginConfigPath();
+  if (!existsSync3(filePath)) {
+    return {};
+  }
+  try {
+    const raw = readFileSync2(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+    const config = {};
+    if (typeof parsed.apiKey === "string" && parsed.apiKey.trim().length > 0) {
+      config.apiKey = parsed.apiKey.trim();
+    }
+    const endpoint = parsed.endpointUrl ?? parsed.endpoint;
+    if (typeof endpoint === "string" && endpoint.trim().length > 0) {
+      config.endpointUrl = endpoint.trim();
+    }
+    if (typeof parsed.timeoutMs === "number" && !Number.isNaN(parsed.timeoutMs) && parsed.timeoutMs > 0) {
+      config.timeoutMs = parsed.timeoutMs;
+    }
+    return config;
+  } catch {
+    return {};
+  }
+}
+function resolveRuntimeConfig(fileConfig) {
+  const envKey = process.env.TYPESAFE_API_KEY?.trim();
+  const fileKey = fileConfig?.apiKey?.trim();
+  const apiKey = envKey && envKey.length > 0 ? envKey : fileKey ?? "";
+  const envEndpoint = process.env.TYPESAFE_API_ENDPOINT?.trim();
+  const fileEndpoint = fileConfig?.endpointUrl?.trim();
+  let endpointUrl = envEndpoint && envEndpoint.length > 0 ? envEndpoint : fileEndpoint && fileEndpoint.length > 0 ? fileEndpoint : DEFAULT_ENDPOINT_URL;
+  if (endpointUrl.endsWith("/v1/battery")) {
+    endpointUrl = endpointUrl.replace(/\/v1\/battery$/, "/v1/systemone");
+  }
+  const envTimeoutRaw = process.env.COMMAND_GUARD_TIMEOUT_MS?.trim();
+  const envTimeout = envTimeoutRaw ? Number.parseInt(envTimeoutRaw, 10) : undefined;
+  const timeoutMs = envTimeout && !Number.isNaN(envTimeout) && envTimeout > 0 ? envTimeout : fileConfig?.timeoutMs && fileConfig.timeoutMs > 0 ? fileConfig.timeoutMs : DEFAULT_TIMEOUT_MS;
+  return {
+    apiKey,
+    endpointUrl,
+    timeoutMs
+  };
+}
+
 // src/index.ts
-var defaultJevClient = createJevClient();
+var pluginConfig = loadPluginConfig();
+var runtimeConfig = resolveRuntimeConfig(pluginConfig);
+var defaultJevClient = createJevClient({
+  apiKey: runtimeConfig.apiKey,
+  endpoint: runtimeConfig.endpointUrl
+});
 async function main() {
   const chunks = [];
   for await (const chunk of process.stdin) {
@@ -794,7 +869,7 @@ async function main() {
   if (rawInput.length === 0) {
     const defaultResponse = {
       decision: "force_ask",
-      reason: "[YELLOW - REVIEW] Intent: unknown | Detail: Empty hook input stream"
+      reason: "Needs review: Empty hook input stream [YELLOW - REVIEW] (intent: unknown)"
     };
     process.stdout.write(JSON.stringify(defaultResponse) + `
 `);
@@ -802,13 +877,16 @@ async function main() {
   }
   try {
     const input = JSON.parse(rawInput);
-    const response = await handlePreToolUse(input, { jevClient: defaultJevClient });
+    const response = await handlePreToolUse(input, {
+      jevClient: defaultJevClient,
+      timeoutMs: runtimeConfig.timeoutMs
+    });
     process.stdout.write(JSON.stringify(response) + `
 `);
   } catch (error) {
     const fallbackResponse = {
       decision: "force_ask",
-      reason: `[YELLOW - REVIEW] Intent: parse_error | Detail: Failed parsing JSON input: ${String(error)}`
+      reason: `Needs review: Failed parsing JSON input: ${String(error)} [YELLOW - REVIEW] (intent: parse_error)`
     };
     process.stdout.write(JSON.stringify(fallbackResponse) + `
 `);

@@ -178,7 +178,7 @@ describe("handlePreToolUse", () => {
     const response = await handlePreToolUse(input, mockEnv);
     expect(response.decision).toBe("deny");
     expect(response.reason).toContain("[RED - DENIED]");
-    expect(response.reason).toContain("Intent: destructive_deletion");
+    expect(response.reason).toContain("(intent: destructive_deletion)");
   });
 
   it("evaluates Yellow tier decision (ask) when Jev reports moderate risk", async () => {
@@ -199,7 +199,7 @@ describe("handlePreToolUse", () => {
     const response = await handlePreToolUse(input, mockEnv);
     expect(response.decision).toBe("force_ask");
     expect(response.reason).toContain("[YELLOW - REVIEW]");
-    expect(response.reason).toContain("Intent: dependency_management");
+    expect(response.reason).toContain("(intent: dependency_management)");
   });
 
   it("evaluates Green tier decision (allow) when Jev reports low risk", async () => {
@@ -220,7 +220,7 @@ describe("handlePreToolUse", () => {
     const response = await handlePreToolUse(input, mockEnv);
     expect(response.decision).toBe("allow");
     expect(response.reason).toContain("[GREEN - ALLOWED]");
-    expect(response.reason).toContain("Intent: build_and_test");
+    expect(response.reason).toContain("(intent: build_and_test)");
   });
 
   it("triggers fallback to ask when evaluation exceeds timeout budget", async () => {
@@ -245,7 +245,7 @@ describe("handlePreToolUse", () => {
     const response = await handlePreToolUse(input, mockEnv);
     expect(response.decision).toBe("force_ask");
     expect(response.reason).toBe(
-      "[YELLOW - REVIEW] Intent: timeout_fallback | Detail: Evaluation exceeded 25ms budget",
+      "Needs review: Evaluation exceeded 25ms budget [YELLOW - REVIEW] (intent: timeout_fallback)",
     );
   });
 
@@ -271,7 +271,7 @@ describe("handlePreToolUse", () => {
     const response = await handlePreToolUse(input, mockEnv);
     expect(response.decision).toBe("force_ask");
     expect(response.reason).toBe(
-      "[YELLOW - REVIEW] Intent: timeout_fallback | Detail: Evaluation exceeded 10ms budget",
+      "Needs review: Evaluation exceeded 10ms budget [YELLOW - REVIEW] (intent: timeout_fallback)",
     );
   });
 
@@ -290,7 +290,7 @@ describe("handlePreToolUse", () => {
     const response = await handlePreToolUse(input, mockEnv);
     expect(response.decision).toBe("force_ask");
     expect(response.reason).toBe(
-      "[YELLOW - REVIEW] Intent: error_fallback | Detail: Evaluation error: Connection refused (ECONNREFUSED)",
+      "Needs review: Evaluation error: Connection refused (ECONNREFUSED) [YELLOW - REVIEW] (intent: error_fallback)",
     );
   });
 
