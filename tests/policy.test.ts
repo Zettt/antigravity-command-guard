@@ -54,7 +54,7 @@ describe("evaluateRiskTier", () => {
       expect(result.tier).toBe("RED");
       expect(result.status).toBe("DENIED");
       expect(result.reason).toContain("[RED - DENIED]");
-      expect(result.reason).toContain("destructive");
+      expect(result.reason).toContain("data loss risk");
     });
 
     it("denies when destructive probability > 0.70", () => {
@@ -98,7 +98,7 @@ describe("evaluateRiskTier", () => {
       expect(result.tier).toBe("YELLOW");
       expect(result.status).toBe("REVIEW");
       expect(result.reason).toContain("[YELLOW - REVIEW]");
-      expect(result.reason).toContain("read-only query outside workspace");
+      expect(result.reason).toContain("Read query outside workspace");
     });
 
     it("denies when severity score >= 2.5 (exact boundary)", () => {
@@ -145,9 +145,9 @@ describe("evaluateRiskTier", () => {
   });
 
   describe("Yellow Tier", () => {
-    it("asks when severity score >= 1.0 (exact boundary)", () => {
+    it("asks when severity score >= 1.5 (exact boundary)", () => {
       const judgment: JevJudgmentBatteryResult = {
-        severity: { score: 1.0 },
+        severity: { score: 1.5 },
         destructive: { noul: 0.1 },
         outside_workspace: { noul: 0.1 },
         intent_category: { choice: "read_only_query" },
@@ -157,7 +157,22 @@ describe("evaluateRiskTier", () => {
       expect(result.tier).toBe("YELLOW");
       expect(result.status).toBe("REVIEW");
       expect(result.reason).toContain("[YELLOW - REVIEW]");
-      expect(result.reason).toContain("severity");
+      expect(result.reason).toContain("Elevated severity score (1.5)");
+    });
+
+    it("identifies workspace modification when severity score >= 2.0", () => {
+      const judgment: JevJudgmentBatteryResult = {
+        severity: { score: 2.0 },
+        destructive: { noul: 0.1 },
+        outside_workspace: { noul: 0.1 },
+        intent_category: { choice: "git_vcs_operation" },
+      };
+      const result = evaluateRiskTier(judgment);
+      expect(result.decision).toBe("force_ask");
+      expect(result.tier).toBe("YELLOW");
+      expect(result.status).toBe("REVIEW");
+      expect(result.reason).toContain("[YELLOW - REVIEW]");
+      expect(result.reason).toContain("Severity indicates workspace modification (2.0)");
     });
 
     it("asks when severity score is just below red threshold (2.49)", () => {
@@ -186,7 +201,7 @@ describe("evaluateRiskTier", () => {
       expect(result.tier).toBe("YELLOW");
       expect(result.status).toBe("REVIEW");
       expect(result.reason).toContain("[YELLOW - REVIEW]");
-      expect(result.reason).toContain("destructive");
+      expect(result.reason).toContain("data loss risk");
     });
 
     it("asks when destructive probability is just below red threshold (0.69)", () => {
@@ -265,9 +280,9 @@ describe("evaluateRiskTier", () => {
       expect(result.reason).toContain("(intent: read_only_query)");
     });
 
-    it("allows low-risk build_and_test command", () => {
+    it("allows routine build_and_test command at severity 1.0", () => {
       const judgment: JevJudgmentBatteryResult = {
-        severity: { score: 0.6 },
+        severity: { score: 1.0 },
         destructive: { noul: 0.05 },
         outside_workspace: { noul: 0.0 },
         intent_category: { choice: "build_and_test" },
@@ -276,12 +291,14 @@ describe("evaluateRiskTier", () => {
       expect(result.decision).toBe("allow");
       expect(result.tier).toBe("GREEN");
       expect(result.status).toBe("ALLOWED");
-      expect(result.reason).toContain("[GREEN - ALLOWED]");
+      expect(result.reason).toBe(
+        "Allowed safe command: Routine operation within safe thresholds (severity: 1.0) [GREEN - ALLOWED] (intent: build_and_test)",
+      );
     });
 
-    it("allows low-risk git_vcs_operation command", () => {
+    it("allows routine git_vcs_operation command at severity 1.2", () => {
       const judgment: JevJudgmentBatteryResult = {
-        severity: { score: 0.4 },
+        severity: { score: 1.2 },
         destructive: { noul: 0.1 },
         outside_workspace: { noul: 0.0 },
         intent_category: { choice: "git_vcs_operation" },
@@ -290,12 +307,14 @@ describe("evaluateRiskTier", () => {
       expect(result.decision).toBe("allow");
       expect(result.tier).toBe("GREEN");
       expect(result.status).toBe("ALLOWED");
-      expect(result.reason).toContain("[GREEN - ALLOWED]");
+      expect(result.reason).toBe(
+        "Allowed safe command: Routine operation within safe thresholds (severity: 1.2) [GREEN - ALLOWED] (intent: git_vcs_operation)",
+      );
     });
 
-    it("allows at upper boundaries of green tier (severity 0.99, destructive 0.29, outside 0.59)", () => {
+    it("allows at upper boundaries of green tier (severity 1.49, destructive 0.29, outside 0.59)", () => {
       const judgment: JevJudgmentBatteryResult = {
-        severity: { score: 0.99 },
+        severity: { score: 1.49 },
         destructive: { noul: 0.29 },
         outside_workspace: { noul: 0.59 },
         intent_category: { choice: "read_only_query" },

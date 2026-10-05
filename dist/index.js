@@ -430,29 +430,31 @@ function formatBadge(tier, status, intent, detail) {
 function collectRedReasons(judgment, outsideTriggered, isReadOnly) {
   const reasons = [];
   if (judgment.destructive.noul >= 0.7) {
-    reasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.70`);
+    reasons.push(`Catastrophic data loss risk (${judgment.destructive.noul.toFixed(2)})`);
   }
   if (outsideTriggered && !isReadOnly) {
-    reasons.push(`outside workspace probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60`);
+    reasons.push(`Mutating path outside workspace (${judgment.outside_workspace.noul.toFixed(2)})`);
   }
   if (judgment.severity.score >= 2.5) {
-    reasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 2.5`);
+    reasons.push(`Critical severity rating (${judgment.severity.score.toFixed(1)})`);
   }
   return reasons;
 }
 function collectYellowReasons(judgment, outsideTriggered, isReadOnly, category) {
   const reasons = [];
-  if (judgment.severity.score >= 1) {
-    reasons.push(`severity score ${judgment.severity.score.toFixed(1)} >= 1.0`);
+  if (judgment.severity.score >= 2) {
+    reasons.push(`Severity indicates workspace modification (${judgment.severity.score.toFixed(1)})`);
+  } else if (judgment.severity.score >= 1.5) {
+    reasons.push(`Elevated severity score (${judgment.severity.score.toFixed(1)})`);
   }
   if (judgment.destructive.noul >= 0.3) {
-    reasons.push(`destructive probability ${judgment.destructive.noul.toFixed(2)} >= 0.30`);
+    reasons.push(`Moderate data loss risk (${judgment.destructive.noul.toFixed(2)})`);
   }
   if (outsideTriggered && isReadOnly) {
-    reasons.push(`read-only query outside workspace (probability ${judgment.outside_workspace.noul.toFixed(2)} >= 0.60)`);
+    reasons.push(`Read query outside workspace (${judgment.outside_workspace.noul.toFixed(2)})`);
   }
   if (MUTATION_CATEGORIES.includes(category)) {
-    reasons.push(`mutating intent category (${category})`);
+    reasons.push(`Mutating operation (${category.replace(/_/g, " ")})`);
   }
   return reasons;
 }
@@ -462,7 +464,7 @@ function evaluateRiskTier(judgment) {
   const outsideTriggered = judgment.outside_workspace.noul >= 0.6;
   const redReasons = collectRedReasons(judgment, outsideTriggered, isReadOnly);
   if (redReasons.length > 0) {
-    const detail = `High risk operation: ${redReasons.join(", ")}`;
+    const detail = redReasons.join(", ");
     return {
       decision: "deny",
       tier: "RED",
@@ -472,7 +474,7 @@ function evaluateRiskTier(judgment) {
   }
   const yellowReasons = collectYellowReasons(judgment, outsideTriggered, isReadOnly, category);
   if (yellowReasons.length > 0) {
-    const detail = `Requires review: ${yellowReasons.join(", ")}`;
+    const detail = yellowReasons.join(", ");
     return {
       decision: "force_ask",
       tier: "YELLOW",
@@ -480,7 +482,7 @@ function evaluateRiskTier(judgment) {
       reason: formatBadge("YELLOW", "REVIEW", category, detail)
     };
   }
-  const detail = `Low risk operation within safe thresholds (severity: ${judgment.severity.score.toFixed(1)})`;
+  const detail = `Routine operation within safe thresholds (severity: ${judgment.severity.score.toFixed(1)})`;
   return {
     decision: "allow",
     tier: "GREEN",
