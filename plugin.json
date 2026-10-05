@@ -1,0 +1,17 @@
+{
+  "name": "command-guard",
+  "displayName": "Command Guard",
+  "version": "0.5.0",
+  "description": "Antigravity PreToolUse safety gate evaluating shell commands and file mutations with TypeSafe Jev risk tiers, fast-path bypasses, dangerous token blocks, and audit logging",
+  "author": {
+    "name": "Antigravity"
+  },
+  "keywords": [
+    "security",
+    "safety",
+    "hooks",
+    "commands",
+    "typesafe",
+    "jev"
+  ]
+}

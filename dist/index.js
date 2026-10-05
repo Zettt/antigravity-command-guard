@@ -550,7 +550,7 @@ function evaluateFileMutationTool(toolName, targetPath, options) {
 }
 
 // src/version.ts
-var VERSION = "0.2.0";
+var VERSION = "0.5.0";
 
 // src/handler.ts
 var FILE_MUTATION_TOOLS = new Set([

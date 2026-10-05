@@ -1,0 +1,5 @@
+{
+  "apiKey": "",
+  "endpointUrl": "https://api.typesafe.ai/v1/systemone",
+  "timeoutMs": 3000
+}
