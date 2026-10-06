@@ -8,13 +8,15 @@
 
 It intercepts agent tool executions (`run_command`, `write_to_file`, `replace_file_content`) to prevent catastrophic file deletion, unintended system mutations, credential exfiltration, and out-of-workspace escapes while maintaining zero latency for routine developer tasks.
 
+Read ["Risk Tiers and Reason Badges"](#risk-tiers-and-reason-badges) for which Command Guard messages will appear when you're using it from now. The typical permission dialog will be the same. Pay attention to the message above the dialog. It will give you an eirhced reason why this permission is now being brought forward to you.
+
 ---
 
 ## Architecture Pipeline
 
 Every command evaluated by Command Guard progresses through an ordered multi-tier evaluation pipeline:
 
-```
+```text
 Tool Invocation (run_command / write_to_file / replace_file_content)
    │
    ├── 1. Filesystem Guard ──────────────────────► Auto-approves agent artifacts
@@ -42,6 +44,7 @@ Tool Invocation (run_command / write_to_file / replace_file_content)
 ## Installation
 
 ### Prerequisites
+
 * **Runtime**: [Bun](https://bun.sh) (`bun` version 1.0 or higher accessible in system PATH).
 * **Environment**: Antigravity CLI (`agy`) or Antigravity Desktop IDE.
 * **Credentials** *(Optional)*: TypeSafe System One API key for semantic Jev evaluation.
@@ -49,11 +52,13 @@ Tool Invocation (run_command / write_to_file / replace_file_content)
 ### Quick Installation (Antigravity CLI & TUI)
 
 Using the Antigravity CLI:
+
 ```bash
 agy plugin install https://github.com/zettt/antigravity-command-guard.git
 ```
 
 Or inside an active Antigravity chat session:
+
 ```text
 /plugin install https://github.com/zettt/antigravity-command-guard.git
 ```
@@ -61,6 +66,7 @@ Or inside an active Antigravity chat session:
 ---
 
 ### Manual Global Installation
+
 Alternatively, clone directly into your Antigravity global plugins directory:
 
 ```bash
@@ -77,6 +83,7 @@ cp config.example.json config.json
 Antigravity automatically discovers and activates plugins present in `~/.gemini/config/plugins/`.
 
 ### Workspace-Scoped Installation
+
 To enforce project-specific guardrails for a team repository:
 
 ```bash
@@ -102,6 +109,7 @@ Settings are managed via `config.json` inside the plugin directory or via enviro
 ```
 
 ### Environment Variable Overrides
+
 Environment variables take precedence over `config.json`:
 
 * `TYPESAFE_API_KEY`: API authentication key.
@@ -109,11 +117,13 @@ Environment variables take precedence over `config.json`:
 * `COMMAND_GUARD_TIMEOUT_MS`: Execution timeout budget for Jev queries (default: `3000`).
 
 ### Offline & Keyless Operation
+
 If no API key is configured, Command Guard functions in deterministic mode:
-- Static fast-path rules (`git status`, `ls`, test runners) execute without interruption.
-- Catastrophic tokens and exploit chains (`rm -rf`, `git reset --hard`) are blocked immediately.
-- Native user settings permissions remain fully enforced.
-- Complex or unfamiliar commands escalate safely to Yellow interactive review with an explanatory notice.
+
+* Static fast-path rules (`git status`, `ls`, test runners) execute without interruption.
+* Catastrophic tokens and exploit chains (`rm -rf`, `git reset --hard`) are blocked immediately.
+* Native user settings permissions remain fully enforced.
+* Complex or unfamiliar commands escalate safely to Yellow interactive review with an explanatory notice.
 
 ---
 
@@ -141,7 +151,9 @@ Antigravity executes the updated bundle on the subsequent agent turn without req
 Command Guard formats decision rationales into concise, human-scannable badges:
 
 ### 1. RED Tier (`DENIED`)
+
 Hard block. Immediately aborts execution with a reason badge:
+
 ```text
 tool call denied by pre-tool hook: Blocked high-risk command: Blocked command token detected: git reset --hard [RED - DENIED] (intent: destructive_deletion)
 tool call denied by pre-tool hook: Blocked high-risk command: Catastrophic data loss risk (0.85) [RED - DENIED] (intent: destructive_deletion)
@@ -149,7 +161,9 @@ tool call denied by pre-tool hook: Blocked high-risk command: Mutating path outs
 ```
 
 ### 2. YELLOW Tier (`REVIEW`)
+
 Interactive escalation. Displays confirmation modal to the user:
+
 ```text
 Needs review: Severity indicates workspace modification (2.0) [YELLOW - REVIEW] (intent: git_vcs_operation)
 Needs review: Elevated severity score (1.8) [YELLOW - REVIEW] (intent: build_and_test)
@@ -158,7 +172,9 @@ Needs review: Read query outside workspace (0.80) [YELLOW - REVIEW] (intent: rea
 ```
 
 ### 3. GREEN Tier (`ALLOWED`)
+
 Auto-approved with zero user friction:
+
 ```text
 Allowed safe command: Static fast-path pass [GREEN - ALLOWED] (intent: read_only_query)
 Allowed safe command: Routine operation within safe thresholds (severity: 1.0) [GREEN - ALLOWED] (intent: build_and_test)
